@@ -1,0 +1,20 @@
+v0.1.0 Foundation
+    □ CT001 Core
+    □ CT002 Geometry
+    □ CT003 Test Reader
+
+v0.2.0 Survey
+    □ Local Coordinates
+    □ Statistics
+    □ Reports
+
+v0.3.0 Catenary
+    □ Solver
+    □ Residuals
+    □ QA
+
+v0.4.0 Fit
+    □ Generate Cable
+    □ Output String
+
+v1.0.0 Transmission
