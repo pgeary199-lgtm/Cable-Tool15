@@ -1,0 +1,27 @@
+/**********************************************************************
+
+    CableTool15
+
+    Tool
+
+        CT001_ReadSurveyString
+
+    Purpose
+
+        Reads a surveyed Super String and reports
+        geometry information.
+
+    Version
+
+        0.1.0
+
+    Target
+
+        12d Model V15
+
+    Authors
+
+        Peter Geary
+        OpenAI
+
+**********************************************************************/
