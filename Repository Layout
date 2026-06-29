@@ -1,0 +1,12 @@
+Cable-Tool15/
+
+docs/
+include/
+macros/
+test_data/
+images/
+
+README.md
+CHANGELOG.md
+LICENSE
+.gitignore
