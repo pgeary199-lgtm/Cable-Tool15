@@ -1,0 +1,502 @@
+/**********************************************************************
+
+    CableTool15
+
+    Tool
+        CT002_GeometryReport
+
+    Motto
+        From Survey to Confidence
+
+    Purpose
+        Reads a selected surveyed conductor string, calculates geometry
+        statistics, and writes a text report file.
+
+    Version
+        0.2.0
+
+    Target
+        12d Model Version 15
+        Compile with:
+            - Allow old string calls
+            - Allow old id calls
+
+    Authors
+        Peter Geary
+        Dev / OpenAI
+
+**********************************************************************/
+
+#include "set_ups.H"
+
+/**********************************************************************
+Function
+    CT_distance_2d
+
+Purpose
+    Calculates horizontal distance between two XY points.
+**********************************************************************/
+Real CT_distance_2d(Real x1, Real y1, Real x2, Real y2)
+{
+  Real dx = x2 - x1;
+  Real dy = y2 - y1;
+
+  return(Sqrt(dx*dx + dy*dy));
+}
+
+/**********************************************************************
+Function
+    CT_distance_3d
+
+Purpose
+    Calculates 3D distance between two XYZ points.
+**********************************************************************/
+Real CT_distance_3d(Real x1, Real y1, Real z1,
+                    Real x2, Real y2, Real z2)
+{
+  Real dx = x2 - x1;
+  Real dy = y2 - y1;
+  Real dz = z2 - z1;
+
+  return(Sqrt(dx*dx + dy*dy + dz*dz));
+}
+
+/**********************************************************************
+Function
+    CT_get_string_xyz
+
+Purpose
+    Reads XYZ from common 12d string types.
+
+Notes
+    This tool intentionally uses legacy string calls because they are
+    available in 12d Model V15 when compiled with:
+        Allow old string calls
+        Allow old id calls
+**********************************************************************/
+Integer CT_get_string_xyz(Element string, Text string_type, Integer point_no,
+                          Real &x, Real &y, Real &z)
+{
+  if(string_type == "2d") {
+
+    Get_2d_data(string,point_no,x,y);
+    z = 0.0;
+    return(TRUE);
+  }
+
+  if(string_type == "3d") {
+
+    Get_3d_data(string,point_no,x,y,z);
+    return(TRUE);
+  }
+
+  if(string_type == "4d") {
+
+    Text point_text;
+    Get_4d_data(string,point_no,x,y,z,point_text);
+    return(TRUE);
+  }
+
+  if(string_type == "Super") {
+
+    Real radius;
+    Integer flag;
+    Get_super_data(string,point_no,x,y,z,radius,flag);
+    return(TRUE);
+  }
+
+  if(string_type == "Polyline") {
+
+    Real radius;
+    Integer flag;
+    Get_polyline_data(string,point_no,x,y,z,radius,flag);
+    return(TRUE);
+  }
+
+  if(string_type == "Pipe") {
+
+    Get_pipe_data(string,point_no,x,y,z);
+    return(TRUE);
+  }
+
+  if(string_type == "Interface" || string_type == "Inteface") {
+
+    Integer flag;
+    Get_interface_data(string,point_no,x,y,z,flag);
+    return(TRUE);
+  }
+
+  return(FALSE);
+}
+
+/**********************************************************************
+Function
+    CT_write_report_line
+
+Purpose
+    Writes one line to the report file and to the output window.
+**********************************************************************/
+void CT_write_report_line(File file, Text line)
+{
+  File_write_line(file,line);
+  Print(line);
+}
+
+/**********************************************************************
+Function
+    CT_point_report_line
+
+Purpose
+    Creates one formatted point table line.
+**********************************************************************/
+Text CT_point_report_line(Integer point_no,
+                          Real x, Real y, Real z,
+                          Real chainage,
+                          Real segment_2d,
+                          Real segment_3d)
+{
+  Text line;
+
+  line = To_text(point_no,"%5ld") + "  " +
+         To_text(x         ,"%14.3lf") + "  " +
+         To_text(y         ,"%14.3lf") + "  " +
+         To_text(z         ,"%10.3lf") + "  " +
+         To_text(chainage  ,"%12.3lf") + "  " +
+         To_text(segment_2d,"%10.3lf") + "  " +
+         To_text(segment_3d,"%10.3lf");
+
+  return(line);
+}
+
+/**********************************************************************
+Function
+    CT_write_geometry_report
+
+Purpose
+    Reads the selected string, calculates geometry, and writes a report.
+**********************************************************************/
+Integer CT_write_geometry_report(Element string,
+                                 Message_Box message,
+                                 Text report_name)
+{
+  Text string_name;
+  Text string_type;
+
+  Get_name(string,string_name);
+  Get_type(string,string_type);
+
+  Integer point_count;
+  Get_points(string,point_count);
+
+  if(point_count < 2) {
+    Set_data(message,"Selected string must contain at least 2 points.");
+    Print("CableTool15: selected string must contain at least 2 points.");
+    return(FALSE);
+  }
+
+  File report_file;
+
+  if(File_exists(report_name)) File_delete(report_name);
+
+  File_open(report_name,"w+","",report_file);
+
+  Real x,y,z;
+  Real previous_x, previous_y, previous_z;
+  Real first_x, first_y, first_z;
+  Real last_x, last_y, last_z;
+
+  Real chainage          = 0.0;
+  Real horizontal_length = 0.0;
+  Real length_3d         = 0.0;
+  Real direct_span_2d    = 0.0;
+  Real direct_span_3d    = 0.0;
+
+  Real lowest_z          = 0.0;
+  Real highest_z         = 0.0;
+  Real total_z           = 0.0;
+
+  Integer lowest_point   = 1;
+  Integer highest_point  = 1;
+
+  Real min_x,max_x,min_y,max_y;
+  Real centroid_x = 0.0;
+  Real centroid_y = 0.0;
+  Real centroid_z = 0.0;
+
+  Integer ok;
+
+  ok = CT_get_string_xyz(string,string_type,1,x,y,z);
+
+  if(ok != TRUE) {
+    File_close(report_file);
+    Set_data(message,"Unsupported string type: " + string_type);
+    Print("CableTool15: unsupported string type: " + string_type);
+    return(FALSE);
+  }
+
+  first_x = x;
+  first_y = y;
+  first_z = z;
+
+  previous_x = x;
+  previous_y = y;
+  previous_z = z;
+
+  lowest_z  = z;
+  highest_z = z;
+  total_z   = z;
+
+  min_x = x;
+  max_x = x;
+  min_y = y;
+  max_y = y;
+
+  centroid_x = x;
+  centroid_y = y;
+  centroid_z = z;
+
+  CT_write_report_line(report_file,"============================================================");
+  CT_write_report_line(report_file,"CableTool15");
+  CT_write_report_line(report_file,"From Survey to Confidence");
+  CT_write_report_line(report_file,"CT002 Geometry Report");
+  CT_write_report_line(report_file,"Version 0.2.0");
+  CT_write_report_line(report_file,"============================================================");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Input");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"String Name : " + string_name);
+  CT_write_report_line(report_file,"String Type : " + string_type);
+  CT_write_report_line(report_file,"Survey Pts  : " + To_text(point_count));
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Point         Easting        Northing          RL      Chainage     Seg 2D     Seg 3D");
+  CT_write_report_line(report_file,"------------------------------------------------------------------------------------");
+  CT_write_report_line(report_file,CT_point_report_line(1,x,y,z,chainage,0.0,0.0));
+
+  for(Integer i=2;i<=point_count;i++) {
+
+    ok = CT_get_string_xyz(string,string_type,i,x,y,z);
+
+    if(ok != TRUE) {
+      File_close(report_file);
+      Set_data(message,"Unable to read point " + To_text(i));
+      Print("CableTool15: unable to read point " + To_text(i));
+      return(FALSE);
+    }
+
+    Real segment_2d = CT_distance_2d(previous_x,previous_y,x,y);
+    Real segment_3d = CT_distance_3d(previous_x,previous_y,previous_z,x,y,z);
+
+    chainage          += segment_2d;
+    horizontal_length += segment_2d;
+    length_3d         += segment_3d;
+
+    if(z < lowest_z) {
+      lowest_z = z;
+      lowest_point = i;
+    }
+
+    if(z > highest_z) {
+      highest_z = z;
+      highest_point = i;
+    }
+
+    if(x < min_x) min_x = x;
+    if(x > max_x) max_x = x;
+    if(y < min_y) min_y = y;
+    if(y > max_y) max_y = y;
+
+    total_z += z;
+
+    centroid_x += x;
+    centroid_y += y;
+    centroid_z += z;
+
+    CT_write_report_line(report_file,
+                         CT_point_report_line(i,x,y,z,chainage,segment_2d,segment_3d));
+
+    previous_x = x;
+    previous_y = y;
+    previous_z = z;
+  }
+
+  last_x = previous_x;
+  last_y = previous_y;
+  last_z = previous_z;
+
+  centroid_x = centroid_x / point_count;
+  centroid_y = centroid_y / point_count;
+  centroid_z = centroid_z / point_count;
+
+  Real average_z = total_z / point_count;
+
+  direct_span_2d = CT_distance_2d(first_x,first_y,last_x,last_y);
+  direct_span_3d = CT_distance_3d(first_x,first_y,first_z,last_x,last_y,last_z);
+
+  Real support_difference = last_z - first_z;
+
+  Real bearing_rad = Atan2(last_y - first_y,last_x - first_x);
+  Real bearing_deg = bearing_rad * 180.0 / Pi();
+
+  if(bearing_deg < 0.0) bearing_deg += 360.0;
+
+  Real survey_density = 0.0;
+
+  if(direct_span_2d > 0.0) {
+    survey_density = (point_count - 1) / direct_span_2d;
+  }
+
+  CT_write_report_line(report_file,"------------------------------------------------------------------------------------");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Geometry Summary");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"Direct horizontal span : " + To_text(direct_span_2d   ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Direct 3D span         : " + To_text(direct_span_3d   ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Surveyed horiz length  : " + To_text(horizontal_length,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Surveyed 3D length     : " + To_text(length_3d        ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Bearing                : " + To_text(bearing_deg      ,"%.3lf") + " degrees");
+  CT_write_report_line(report_file,"Support RL difference  : " + To_text(support_difference,"%.3lf") + " m");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"RL Summary");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"First RL               : " + To_text(first_z    ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Last RL                : " + To_text(last_z     ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"Lowest surveyed RL     : " + To_text(lowest_z   ,"%.3lf") + " m at point " + To_text(lowest_point));
+  CT_write_report_line(report_file,"Highest surveyed RL    : " + To_text(highest_z  ,"%.3lf") + " m at point " + To_text(highest_point));
+  CT_write_report_line(report_file,"Average RL             : " + To_text(average_z  ,"%.3lf") + " m");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Extent / Centroid");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"Min Easting            : " + To_text(min_x,"%.3lf"));
+  CT_write_report_line(report_file,"Max Easting            : " + To_text(max_x,"%.3lf"));
+  CT_write_report_line(report_file,"Min Northing           : " + To_text(min_y,"%.3lf"));
+  CT_write_report_line(report_file,"Max Northing           : " + To_text(max_y,"%.3lf"));
+  CT_write_report_line(report_file,"Centroid Easting       : " + To_text(centroid_x,"%.3lf"));
+  CT_write_report_line(report_file,"Centroid Northing      : " + To_text(centroid_y,"%.3lf"));
+  CT_write_report_line(report_file,"Centroid RL            : " + To_text(centroid_z,"%.3lf"));
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Survey Density");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"Survey points per metre: " + To_text(survey_density,"%.4lf"));
+  CT_write_report_line(report_file,"Average point spacing  : " + To_text((direct_span_2d/(point_count-1)),"%.3lf") + " m");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Solver Readiness");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+
+  if(point_count >= 5) {
+    CT_write_report_line(report_file,"Status                 : READY FOR CATENARY FIT");
+  } else {
+    CT_write_report_line(report_file,"Status                 : NOT ENOUGH POINTS FOR CATENARY FIT");
+    CT_write_report_line(report_file,"Minimum recommended    : 5 points");
+  }
+
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"Note");
+  CT_write_report_line(report_file,"------------------------------------------------------------");
+  CT_write_report_line(report_file,"Lowest surveyed RL is not necessarily the true lowest point.");
+  CT_write_report_line(report_file,"The true lowest point will be calculated from the fitted catenary");
+  CT_write_report_line(report_file,"in the next solver stage.");
+  CT_write_report_line(report_file,"");
+  CT_write_report_line(report_file,"============================================================");
+  CT_write_report_line(report_file,"End of CableTool15 CT002 Geometry Report");
+  CT_write_report_line(report_file,"============================================================");
+
+  File_flush(report_file);
+  File_close(report_file);
+
+  Set_data(message,"Report written: " + report_name + "   Points: " + To_text(point_count));
+  Print("");
+  Print("CableTool15 report written: " + report_name);
+  Print("");
+
+  return(TRUE);
+}
+
+/**********************************************************************
+Function
+    CT002_manage_panel
+
+Purpose
+    Creates and manages the CT002 panel.
+**********************************************************************/
+void CT002_manage_panel()
+{
+  Panel panel = Create_panel("CableTool15 - Geometry Report");
+
+  Vertical_Group main_group = Create_vertical_group(0);
+  Set_border(main_group,"Survey String");
+
+  Message_Box message = Create_message_box("Select a surveyed conductor string and press Analyse.");
+
+  Select_Box select_box = Create_select_box("&Survey string","Pick surveyed conductor string",SELECT_STRING,message);
+  Append(select_box,main_group);
+
+  Horizontal_Group button_group = Create_button_group();
+  Set_border(button_group,"Processing");
+
+  Button analyse_button = Create_button("&Analyse","analyse");
+  Button finish_button  = Create_button("&Finish","finish");
+
+  Append(analyse_button,button_group);
+  Append(finish_button,button_group);
+
+  Append(main_group,panel);
+  Append(message,panel);
+  Append(button_group,panel);
+
+  Show_widget(panel);
+
+  Integer running = TRUE;
+
+  while(running) {
+
+    Integer id;
+    Text cmd;
+    Text msg;
+
+    Integer ret = Wait_on_widgets(id,cmd,msg);
+
+    if(cmd == "keystroke") continue;
+
+    switch(id) {
+
+      case Get_id(panel) : {
+
+        if(cmd == "Panel Quit") running = FALSE;
+      } break;
+
+      case Get_id(finish_button) : {
+
+        if(cmd == "finish") running = FALSE;
+      } break;
+
+      case Get_id(analyse_button) : {
+
+        Element selected_string;
+
+        Integer ierr = Validate(select_box,selected_string);
+
+        if(ierr != TRUE) {
+          Set_data(message,"Please select a string first.");
+          break;
+        }
+
+        CT_write_geometry_report(selected_string,
+                                 message,
+                                 "CableTool15_Geometry_Report.rpt");
+
+      } break;
+    }
+  }
+}
+
+/**********************************************************************
+Function
+    main
+
+Purpose
+    Program entry point.
+**********************************************************************/
+void main()
+{
+  CT002_manage_panel();
+}
